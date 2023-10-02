@@ -1,0 +1,58 @@
+{
+    // See https://go.microsoft.com/fwlink/?LinkId=733558
+    // for the documentation about the tasks.json format
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Netlinx Build",
+            "type": "shell",
+            "windows": {
+                "command": "C:\\Program Files (x86)\\Common Files\\AMXShare\\COM\\NLRC.exe",
+                "args": [
+                    {
+                        "value": "C:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Projects\\GVAV\\Kingston University\\Source\\KH-Lawley-LT-Main-NX.axs",
+                        "quoting": "escape"
+                    },
+                    {
+                        "value": "-IC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Projects\\GVAV\\Kingston University\\Include",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-IC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Resources\\AMX\\RMS\\4.7.18\\includes",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-IC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Resources\\AMX\\Includes\\NAVFoundation",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-IC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Resources\\AMX\\Includes\\MD5",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-MC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Projects\\GVAV\\Kingston University\\Module",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-MC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Resources\\AMX\\RMS\\4.7.18\\core-modules",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-MC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Resources\\AMX\\RMS\\4.7.18\\monitors-netlinx",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-MC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Resources\\AMX\\RMS\\4.7.18\\monitors-duet",
+                        "quoting": "strong"
+                    },
+                    {
+                        "value": "-MC:\\Users\\DamienButt\\Norgate AV Dropbox\\Damien Butt\\Resources\\AMX\\RMS\\4.7.18\\monitors",
+                        "quoting": "strong"
+                    }
+                ]
+            },
+            "problemMatcher": ["$nlrc"],
+            "group": "build"
+        }
+    ]
+}

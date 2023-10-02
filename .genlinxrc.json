@@ -1,0 +1,8 @@
+{
+    "build": {
+        "nlrc": {
+            "includePath": ["./lib"],
+            "modulePath": ["./src"]
+        }
+    }
+}

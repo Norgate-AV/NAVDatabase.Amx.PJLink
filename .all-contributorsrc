@@ -1,0 +1,13 @@
+{
+    "projectName": "NAVDatabase.Amx.PJLink",
+    "projectOwner": "Norgate-AV",
+    "repoType": "github",
+    "repoHost": "https://github.com",
+    "files": ["README.md"],
+    "imageSize": 100,
+    "commit": false,
+    "commitConvention": "angular",
+    "contributorsPerLine": 7,
+    "skipCi": true,
+    "contributors": []
+}
