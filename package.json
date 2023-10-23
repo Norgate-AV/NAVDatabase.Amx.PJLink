@@ -33,7 +33,7 @@
     },
     "devDependencies": {
         "@commitlint/cli": "^17.4.4",
-        "@commitlint/config-conventional": "^17.4.4",
+        "@commitlint/config-conventional": "^18.0.0",
         "@norgate-av/genlinx": "^1.0.0",
         "all-contributors-cli": "^6.24.0",
         "commitizen": "^4.3.0",
