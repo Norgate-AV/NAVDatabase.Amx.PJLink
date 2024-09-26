@@ -1,7 +1,7 @@
 {
-    "name": "NAVDatabase.Amx.PJLink",
+    "name": "navdatabase.amx.pjlink",
+    "displayName": "NAVDatabase.Amx.PJLink",
     "version": "1.0.0",
-    "private": true,
     "keywords": [
         "amx",
         "netlinx",
@@ -17,31 +17,28 @@
         "url": "https://github.com/Norgate-AV/NAVDatabase.Amx.PJLink/issues"
     },
     "engines": {
-        "node": ">=14"
+        "node": ">=18"
     },
     "scripts": {
-        "build": "./build.ps1",
+        "build": "pwsh ./build.ps1",
         "commit": "git-cz",
-        "prepare": "husky install",
+        "prepare": "husky",
         "pretty:fix": "prettier --write .",
         "doctoc": "doctoc README.md",
         "contrib:add": "all-contributors add",
         "contrib:generate": "all-contributors generate",
-        "contrib:check": "all-contributors check",
-        "size": "size-limit",
-        "analyze": "size-limit --why"
+        "contrib:check": "all-contributors check"
     },
     "devDependencies": {
-        "@commitlint/cli": "^17.4.4",
-        "@commitlint/config-conventional": "^17.4.4",
-        "@norgate-av/genlinx": "^1.0.0",
+        "@commitlint/cli": "^19.5.0",
+        "@commitlint/config-conventional": "^19.5.0",
+        "@norgate-av/genlinx": "^2.5.0",
         "all-contributors-cli": "^6.24.0",
         "commitizen": "^4.3.0",
         "cz-conventional-changelog": "3.3.0",
         "doctoc": "^2.2.1",
-        "husky": "^8.0.3",
-        "lint-staged": "^14.0.1",
-        "prettier": "^3.0.3",
-        "size-limit": "^9.0.0"
+        "husky": "^9.1.6",
+        "lint-staged": "^15.2.0",
+        "prettier": "^3.1.1"
     }
 }
