@@ -1,3 +1,4 @@
+#!/usr/bin/env pwsh
 #Requires -RunAsAdministrator
 
 <#
@@ -35,62 +36,90 @@ SOFTWARE.
 
 param (
     [Parameter(Mandatory = $false)]
-    [string]
-    $Path = ".",
-
-    [Parameter(Mandatory = $false)]
+    [ValidateNotNullOrEmpty()]
     [string]
     $ModulePath = "C:\Program Files (x86)\Common Files\AMXShare\Duet\module",
 
     [Parameter(Mandatory = $false)]
     [string]
-    $IncludePath = "C:\Program Files (x86)\Common Files\AMXShare\AXIs"
+    $IncludePath = "C:\Program Files (x86)\Common Files\AMXShare\AXIs",
+
+    [Parameter(Mandatory = $false)]
+    [switch]
+    $Delete = $false
 )
 
+$prevPWD = $PWD
+Set-Location $PSScriptRoot
+
 try {
-    $Path = Resolve-Path $Path
+    $moduleFiles = Get-ChildItem -File "**/*.axs" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "(.git|.history|node_modules)" }
+    $includeFiles = Get-ChildItem -File "**/*.axi" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "(.git|.history|node_modules)" }
 
-    $directories = Get-ChildItem -Path $Path -Directory -Recurse | Where-Object { $_.FullName -notmatch "(.git|.history|node_modules)" }
-
-    $moduleFiles = $directories | Get-ChildItem -File -Include *.axs -ErrorAction SilentlyContinue
-    $includeFiles = $directories | Get-ChildItem -File -Include *.axi -ErrorAction SilentlyContinue
-
-    if (!$moduleFiles -and !$includeFiles) {
-        Write-Host "No files found in $Path" -ForegroundColor Yellow
-        exit
+    if (!$moduleFiles) {
+        Write-Host "No module files found"
+        exit 1
     }
 
-    foreach ($file in $includeFiles) {
-        $path = Join-Path -Path $IncludePath -ChildPath $file.Name
-        $target = $file.FullName
-
-        Write-Host "Creating symlink: $path -> $target" -ForegroundColor Green
-        New-Item -ItemType SymbolicLink -Path $path -Target $target -Force | Out-Null
-    }
-
+    # Ensure there is a compiled TKO file for each AXS file
     foreach ($file in $moduleFiles) {
         if (!(Test-Path $($file.FullName -replace ".axs", ".tko"))) {
             Write-Host "TKO file not found for $file" -ForegroundColor Yellow
+            exit 1
+        }
+    }
+
+    $ModulePath = Resolve-Path $ModulePath
+    $IncludePath = Resolve-Path $IncludePath
+
+    !$Delete ? (Write-Host "Creating symlinks...") : (Write-Host "Deleting symlinks...")
+
+    # It's possible to have a module without any AXI files
+    if ($includeFiles) {
+        foreach ($file in $includeFiles) {
+            $path = "$IncludePath\$($file.Name)"
+
+            if ($Delete) {
+                Write-Verbose "Deleting symlink: $path"
+                Remove-Item -Path $path -Force | Out-Null
+                continue
+            }
+
+            $target = $file.FullName
+
+            Write-Verbose "Creating symlink: $path -> $target"
+            New-Item -ItemType SymbolicLink -Path $path -Target $target -Force | Out-Null
+        }
+    }
+
+    foreach ($file in $moduleFiles) {
+        $axsPath = "$ModulePath\$($file.Name)"
+        $tkoPath = "$ModulePath\$($file.Name -replace ".axs", ".tko")"
+
+        $axsTarget = $file.FullName
+        $tkoTarget = $file.FullName -replace ".axs", ".tko"
+
+        if ($Delete) {
+            Write-Verbose "Deleting symlink: $axsPath"
+            Remove-Item -Path $axsPath -Force | Out-Null
+
+            Write-Verbose "Deleting symlink: $tkoPath"
+            Remove-Item -Path $tkoPath -Force | Out-Null
+
             continue
         }
 
-        $path = Join-Path -Path $ModulePath -ChildPath $file.Name
-        $target = $file.FullName
+        Write-Verbose "Creating symlink: $axsPath -> $axsTarget"
+        New-Item -ItemType SymbolicLink -Path $axsPath -Target $axsTarget -Force | Out-Null
 
-        Write-Host "Creating symlink: $path -> $target" -ForegroundColor Green
-        New-Item -ItemType SymbolicLink -Path $path -Target $target -Force | Out-Null
-
-        $path = Join-Path -Path $ModulePath -ChildPath $($file.Name -replace ".axs", ".tko")
-        $target = $file.FullName -replace ".axs", ".tko"
-
-        Write-Host "Creating symlink: $path -> $target" -ForegroundColor Green
-        New-Item -ItemType SymbolicLink -Path $path -Target $target -Force | Out-Null
+        Write-Verbose "Creating symlink: $tkoPath -> $tkoTarget"
+        New-Item -ItemType SymbolicLink -Path $tkoPath -Target $tkoTarget -Force | Out-Null
     }
 }
 catch {
     Write-Host $_.Exception.GetBaseException().Message -ForegroundColor Red
     exit 1
 }
-
-Write-Host
-Read-Host -Prompt "Press any key to exit..."
+finally {
+    Set-Location $prevPWD
+}
