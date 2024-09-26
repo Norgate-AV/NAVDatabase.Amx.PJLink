@@ -4,10 +4,17 @@ MODULE_NAME='mPJLink'   (
                         )
 
 (***********************************************************)
+#DEFINE USING_NAV_MODULE_BASE_CALLBACKS
+#DEFINE USING_NAV_MODULE_BASE_PROPERTY_EVENT_CALLBACK
+#DEFINE USING_NAV_MODULE_BASE_PASSTHRU_EVENT_CALLBACK
+#DEFINE USING_NAV_STRING_GATHER_CALLBACK
+#DEFINE USING_NAV_LOGIC_ENGINE_EVENT_CALLBACK
+#include 'NAVFoundation.LogicEngine.axi'
 #include 'NAVFoundation.ModuleBase.axi'
 #include 'NAVFoundation.SocketUtils.axi'
-#include 'NAVFoundation.ArrayUtils.axi'
-#include 'md5.axi'
+#include 'NAVFoundation.StringUtils.axi'
+#include 'NAVFoundation.Cryptography.Md5.axi'
+#include 'LibPJLink.axi'
 
 /*
  _   _                       _          ___     __
@@ -50,49 +57,10 @@ DEFINE_DEVICE
 (***********************************************************)
 DEFINE_CONSTANT
 
-constant long TL_DRIVE    = 1
-constant long TL_IP_CLIENT_CHECK = 2
+constant long TL_SOCKET_CHECK   = 1
 
-constant integer POWER_STATE_ON    = 1
-constant integer POWER_STATE_OFF= 2
-constant integer POWER_STATE_LAMP_WARMING = 3
-constant integer POWER_STATE_LAMP_COOLING = 4
+constant long TL_SOCKET_CHECK_INTERVAL[] = { 3000 }
 
-constant integer INPUT_DIGITAL_1    = 1
-constant integer INPUT_DIGITAL_2    = 2
-constant integer INPUT_DIGITAL_3    = 3
-constant integer INPUT_DIGITAL_4    = 4
-constant integer INPUT_DIGITAL_5    = 5
-constant integer INPUT_DIGITAL_6    = 6
-constant integer INPUT_DIGITAL_7    = 7
-constant integer INPUT_DIGITAL_8    = 8
-constant integer INPUT_DIGITAL_9    = 9
-
-constant char INPUT_COMMANDS[][NAV_MAX_CHARS]    = { '31',
-                            '32',
-                            '33',
-                            '34',
-                            '35',
-                            '36',
-                            '37',
-                            '38',
-                            '39' }
-
-constant integer GET_POWER    = 1
-constant integer GET_INPUT    = 2
-constant integer GET_MUTE    = 3
-constant integer GET_VOLUME    = 4
-constant integer GET_LAMP    = 5
-
-constant integer AUDIO_MUTE_ON    = 1
-constant integer AUDIO_MUTE_OFF    = 2
-
-constant integer MAX_VOLUME = 100
-constant integer MIN_VOLUME = 0
-
-constant integer DEFAULT_TCP_PORT    = 4352
-
-constant char HEADER[][2]    = { '%1', '%2' }
 
 (***********************************************************)
 (*              DATA TYPE DEFINITIONS GO BELOW             *)
@@ -103,40 +71,18 @@ DEFINE_TYPE
 (*               VARIABLE DEFINITIONS GO BELOW             *)
 (***********************************************************)
 DEFINE_VARIABLE
-volatile _NAVDisplay uDisplay
 
-volatile long ltIPClientCheck[] = { 3000 }
+volatile _NAVProjector object
 
-volatile integer iLoop
-volatile integer iPollSequence = GET_POWER
+volatile integer pollSequence = GET_POWER
 
-volatile integer iRequiredPower
-volatile integer iRequiredInput
-volatile integer iRequiredAudioMute
+volatile integer secureCommandRequired
+volatile integer connectionStarted
 
-volatile long ltDrive[] = { 200 }
+volatile char md5Seed[255]
 
-volatile integer iSemaphore
-volatile char cRxBuffer[NAV_MAX_BUFFER]
+volatile _NAVCredential credential = { '', 'JBMIAProjectorLink' }
 
-volatile integer iPowerBusy
-
-volatile integer iCommandBusy
-volatile integer iCommandLockOut
-
-volatile _NAVSocketConnection uIPConnection
-
-volatile integer iInputInitialized
-volatile integer iAudioMuteInitialized
-
-volatile integer iSecureCommandRequired
-volatile integer iConnectionStarted
-volatile char cMD5RandomNumber[255]
-volatile char cMD5StringToEncode[255]
-
-volatile integer iLampHours[2]
-
-volatile char cPassword[NAV_MAX_CHARS] = 'JBMIAProjectorLink'
 
 (***********************************************************)
 (*               LATCHING DEFINITIONS GO BELOW             *)
@@ -153,392 +99,539 @@ DEFINE_MUTUALLY_EXCLUSIVE
 (***********************************************************)
 (* EXAMPLE: DEFINE_FUNCTION <RETURN_TYPE> <NAME> (<PARAMETERS>) *)
 (* EXAMPLE: DEFINE_CALL '<NAME>' (<PARAMETERS>) *)
-define_function Send(char cPayload[]) {
-    NAVLog(NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_STRING_TO, dvPort, cPayload))
-    send_string dvPort, "cPayload"
-}
 
-define_function Build(char cHeader[], char cParam[]) {
-    char cPayload[NAV_MAX_BUFFER]
-    cPayload = "cHeader, cParam, NAV_CR"
+define_function SendString(char payload[]) {
+    payload = "payload, DELIMITER"
 
-    if (iSecureCommandRequired) {
-    cPayload = "Encrypt(cMD5StringToEncode), cPayload"
+    if (secureCommandRequired) {
+        payload = "NAVMd5GetHash(GetMd5Message(credential, md5Seed)), payload"
     }
 
-    Send(cPayload)
+    NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
+                NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_STRING_TO,
+                                            dvPort,
+                                            payload))
+
+    send_string dvPort, "payload"
 }
 
-define_function SendQuery(integer iParam) {
-    switch (iParam) {
-    case GET_POWER: Build(HEADER[1], 'POWR ?')
-    case GET_INPUT: Build(HEADER[1], 'INPT ?')
-    case GET_MUTE: Build(HEADER[1], 'AVMT ?')
-    case GET_VOLUME: Build(HEADER[1], '')
-    case GET_LAMP: Build(HEADER[1], 'LAMP ?')
-    }
-}
 
-define_function TimeOut() {
-    cancel_wait 'CommsTimeOut'
-    wait 300 'CommsTimeOut' {
-    [vdvObject, DEVICE_COMMUNICATING] = false
-    NAVClientSocketClose(dvPort.PORT)
+define_function SendQuery(integer query) {
+    switch (query) {
+        case GET_POWER:     { SendString(BuildProtocol(HEADER[1], COMMAND_POWER, '?')) }
+        case GET_INPUT:     { SendString(BuildProtocol(HEADER[1], COMMAND_INPUT, '?')) }
+        case GET_MUTE:      { SendString(BuildProtocol(HEADER[1], COMMAND_AV_MUTE, '?')) }
+        // case GET_VOLUME:    { SendString(BuildProtocol(HEADER[1], '', '?')) }
+        case GET_LAMP:      { SendString(BuildProtocol(HEADER[1], COMMAND_LAMP, '?')) }
+        default:            { SendQuery(GET_POWER) }
     }
 }
 
-define_function SetPower(integer iParam) {
-    switch (iParam) {
-    case POWER_STATE_ON: { Build(HEADER[1], 'POWR 1') }
-    case POWER_STATE_OFF: { Build(HEADER[1], 'POWR 0') }
+
+define_function CommunicationTimeOut(integer timeout) {
+    cancel_wait 'TimeOut'
+
+    module.Device.IsCommunicating = true
+
+    wait (timeout * 10) 'TimeOut' {
+        module.Device.IsCommunicating = false
     }
 }
 
-define_function SetInput(integer iParam) { Build(HEADER[1], "'INPT ', INPUT_COMMANDS[iParam]") }
 
-define_function RampVolume(integer iParam) {
-    switch (iParam) {
-    case VOL_UP: {
-        Build(HEADER[2], 'SVOL 1')
-    }
-    case VOL_DN: {
-        Build(HEADER[2], 'SVOL 0')
-    }
+define_function Reset() {
+    module.Device.SocketConnection.IsConnected = false
+    module.Device.IsCommunicating = false
+    module.Device.IsInitialized = false
+
+    connectionStarted = false
+
+    NAVLogicEngineStop()
+}
+
+
+define_function SetPower(integer state) {
+    switch (state) {
+        case NAV_POWER_STATE_ON:    { SendString(BuildProtocol(HEADER[1], COMMAND_POWER, '1')) }
+        case NAV_POWER_STATE_OFF:   { SendString(BuildProtocol(HEADER[1], COMMAND_POWER, '0')) }
     }
 }
 
-define_function SetAudioMute(integer iParam) {
-    switch (iParam) {
-    case AUDIO_MUTE_ON: { Build(HEADER[1], 'AVMT 21') }
-    case AUDIO_MUTE_OFF: { Build(HEADER[1], 'AVMT 20') }
-    }
+
+define_function SetInput(integer input) {
+    SendString(BuildProtocol(HEADER[1], COMMAND_INPUT, INPUT_COMMANDS[input]))
 }
 
-define_function Process() {
-    stack_var char cTemp[NAV_MAX_BUFFER]
-    iSemaphore = true
-    NAVLog("'Processing String From ', NAVStringSurroundWith(NAVDeviceToString(dvPort), '[', ']'), '-[', cRxBuffer, ']'")
-    while (length_array(cRxBuffer) && NAVContains(cRxBuffer, "NAV_CR")) {
-    cTemp = remove_string(cRxBuffer, "NAV_CR", 1)
 
-    if (length_array(cTemp)) {
-        NAVLog(NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_PARSING_STRING_FROM, dvPort, cTemp))
-        cTemp = NAVStripCharsFromRight(cTemp, 1)    //Remove delimiter
-        select {
-        active (NAVStartsWith(cTemp, 'PJLINK')): {
-            //Connection Started
-            cTemp = NAVStripCharsFromLeft(cTemp, 7);
-            iSecureCommandRequired = atoi(remove_string(cTemp, ' ', 1));
-            if (iSecureCommandRequired) {
-            cMD5RandomNumber = cTemp;
-            cMD5StringToEncode = "cMD5RandomNumber, cPassword"
-            }
-
-            iConnectionStarted = 1;
-            iLoop = 0;
-            Drive();
+define_function RampVolume(integer direction) {
+    switch (direction) {
+        case VOL_UP: {
+            SendString(BuildProtocol(HEADER[2], 'SVOL', '1'))
         }
-        active (1): {
-            stack_var char cAtt[NAV_MAX_CHARS]
-            cTemp = NAVStripCharsFromLeft(cTemp, 2)    //Remove header
-            cAtt = NAVStripCharsFromRight(remove_string(cTemp, '=', 1), 1);
-            switch (cAtt) {
-            case 'POWR': {
-                if (!NAVContains(cTemp, 'OK')) {
-                switch (atoi(cTemp)) {
-                    case 0: { uDisplay.PowerState.Actual = POWER_STATE_OFF; }
-                    case 1: {
-                    uDisplay.PowerState.Actual = POWER_STATE_ON;
-                    select {
-                        active (!iInputInitialized): {
-                        iPollSequence = GET_INPUT;
-                        }
-                        /*
-                        case(!iVideoMuteInitialized): {
-                        iPollSequence = GET_MUTE;
-                        }
-                        */
-                        active (!iAudioMuteInitialized): {
-                        iPollSequence = GET_MUTE;
-                        }
-                        active (1): {
-                        iPollSequence = GET_LAMP;
-                        }
-                    }
-                    }
-                    case 2: {    //Cooling
-                    uDisplay.PowerState.Actual = POWER_STATE_LAMP_COOLING
-                    iPollSequence = GET_LAMP;
-                    }
-                    case 3: {    //Warming
-                    uDisplay.PowerState.Actual = POWER_STATE_LAMP_WARMING
-                    iPollSequence = GET_LAMP;
-                    }
-                }
-                }
-            }
-            case 'INPT': {
-                if (!NAVContains(cTemp, 'OK')) {
-                uDisplay.Input.Actual = NAVFindInArraySTRING(INPUT_COMMANDS, cTemp)
-                iInputInitialized = 1;
-                iPollSequence = GET_POWER;
-                }
-            }
-            case 'AVMT': {
-                if (!NAVContains(cTemp, 'OK')) {
-                switch (cTemp) {
-                    case '11': {  }
-                    case '21': { uDisplay.Volume.Mute.Actual = AUDIO_MUTE_ON; }
-                    case '31': { uDisplay.Volume.Mute.Actual = AUDIO_MUTE_ON; }
-                    case '30': { uDisplay.Volume.Mute.Actual = AUDIO_MUTE_OFF; }
-                }
-
-                //iVideoMuteInitialized = 1;
-                iAudioMuteInitialized = 1;
-                iPollSequence = GET_POWER;
-                }
-            }
-            case 'LAMP': {
-                stack_var integer iTemp
-                if (NAVContains(cTemp, ' ')) {
-                iTemp = atoi(NAVStripCharsFromRight(remove_string(cTemp, ' ', 1), 1));
-                if (iLampHours[1] <> iTemp) {
-                    iLampHours[1] = iTemp;
-                    send_string vdvObject,"'LAMPTIME-',itoa(iLampHours[1])"
-                }
-
-                remove_string(cTemp, ' ', 1);    //Ignore Lamp Power Status
-                iTemp = atoi(NAVStripCharsFromRight(remove_string(cTemp, ' ', 1), 1));
-                if (iLampHours[2] <> iTemp) {
-                    iLampHours[2] = iTemp;
-                    send_string vdvObject,"'LAMPTIME-',itoa(iLampHours[1])"
-                }
-                }else {
-                iTemp = atoi(cTemp);
-                if (iLampHours[1] <> iTemp) {
-                    iLampHours[1] = iTemp;
-                    send_string vdvObject,"'LAMPTIME-',itoa(iLampHours[1])"
-                }
-                }
-
-                iPollSequence = GET_POWER;
-            }
-            }
-        }
+        case VOL_DN: {
+            SendString(BuildProtocol(HEADER[2], 'SVOL', '0'))
         }
     }
-    }
-
-    iSemaphore = false
 }
 
-define_function Drive() {
-    if (!iConnectionStarted) {
-    return;
+
+define_function SetAudioMute(integer state) {
+    switch (state) {
+        case NAV_MUTE_STATE_ON:     { SendString(BuildProtocol(HEADER[1], COMMAND_AV_MUTE, '21')) }
+        case NAV_MUTE_STATE_OFF:    { SendString(BuildProtocol(HEADER[1], COMMAND_AV_MUTE, '20')) }
+    }
+}
+
+
+#IF_DEFINED USING_NAV_STRING_GATHER_CALLBACK
+define_function NAVStringGatherCallback(_NAVStringGatherResult args) {
+    stack_var char data[NAV_MAX_BUFFER]
+    stack_var char delimiter[NAV_MAX_CHARS]
+
+    data = args.Data
+    delimiter = args.Delimiter
+
+    NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
+                NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_PARSING_STRING_FROM,
+                                            dvPort,
+                                            data))
+
+    data = NAVStripRight(data, length_array(delimiter))
+
+    select {
+        active (NAVStartsWith(data, 'PJLINK')): {
+            data = NAVStripLeft(data, 7);
+
+            secureCommandRequired = atoi(remove_string(data, ' ', 1));
+
+            if (secureCommandRequired) {
+                md5Seed = data;
+            }
+
+            connectionStarted = true;
+        }
+        active (true): {
+            stack_var char cmd[NAV_MAX_CHARS]
+
+            data = NAVStripLeft(data, 2)
+
+            cmd = NAVStripRight(remove_string(data, '=', 1), 1)
+
+            if (NAVContains(data, 'OK')) {
+                // Ignore command acknowledgements
+                return
+            }
+
+            switch (cmd) {
+                case COMMAND_POWER: {
+                    switch (data) {
+                        case '0': {
+                            object.Display.PowerState.Actual = NAV_POWER_STATE_OFF
+                        }
+                        case '1': {
+                            object.Display.PowerState.Actual = NAV_POWER_STATE_ON
+
+                            select {
+                                active (!object.Display.Input.Initialized): {
+                                    pollSequence = GET_INPUT
+                                }
+                                active (!object.Display.VideoMute.Initialized): {
+                                    pollSequence = GET_MUTE
+                                }
+                                active (true): {
+                                    pollSequence = GET_LAMP
+                                }
+                            }
+                        }
+                        case '2': {
+                            object.Display.PowerState.Actual = NAV_POWER_STATE_LAMP_COOLING
+                            pollSequence = GET_LAMP
+                        }
+                        case '3': {
+                            object.Display.PowerState.Actual = NAV_POWER_STATE_LAMP_WARMING
+                            pollSequence = GET_LAMP
+                        }
+                    }
+                }
+                case COMMAND_INPUT: {
+                    stack_var integer input
+
+                    input = NAVFindInArrayString(INPUT_COMMANDS, data)
+
+                    if (input) {
+                        object.Display.Input.Actual = input
+                        object.Display.Input.Initialized = true
+                    }
+
+                    pollSequence = GET_POWER
+                }
+                case COMMAND_AV_MUTE: {
+                    switch (data) {
+                        case '11': {  }
+                        case '21': { object.Display.VideoMute.Actual = NAV_MUTE_STATE_ON }
+                        case '31': { object.Display.VideoMute.Actual = NAV_MUTE_STATE_ON }
+                        case '30': { object.Display.VideoMute.Actual = NAV_MUTE_STATE_OFF }
+                    }
+
+                    object.Display.VideoMute.Initialized = true
+                    pollSequence = GET_POWER
+                }
+                case COMMAND_LAMP: {
+                    stack_var integer hours
+
+                    if (NAVContains(data, ' ')) {
+                        hours = atoi(NAVStripRight(remove_string(data, ' ', 1), 1))
+
+                        if (object.LampHours[1].Actual != hours) {
+                            object.LampHours[1].Actual = hours
+                            send_string vdvObject, "'LAMPTIME-', itoa(object.LampHours[1].Actual)"
+                        }
+
+                        remove_string(data, ' ', 1)
+                        hours = atoi(NAVStripRight(remove_string(data, ' ', 1), 1))
+
+                        if (object.LampHours[2].Actual != hours) {
+                            object.LampHours[2].Actual = hours
+                            send_string vdvObject, "'LAMPTIME-', itoa(object.LampHours[2].Actual)"
+                        }
+                    }
+                    else {
+                        hours = atoi(data)
+
+                        if (object.LampHours[1].Actual != hours) {
+                            object.LampHours[1].Actual = hours
+                            send_string vdvObject, "'LAMPTIME-', itoa(object.LampHours[1].Actual)"
+                        }
+                    }
+
+                    pollSequence = GET_POWER
+                }
+            }
+        }
+    }
+}
+#END_IF
+
+
+#IF_DEFINED USING_NAV_LOGIC_ENGINE_EVENT_CALLBACK
+define_function NAVLogicEngineEventCallback(_NAVLogicEngineEvent args) {
+    if (!connectionStarted) {
+        return;
     }
 
-    if (iSecureCommandRequired && !length_array(cMD5StringToEncode)) {
-    return;
+    if (secureCommandRequired && !length_array(md5Seed)) {
+        return;
     }
 
-    if (!uIPConnection.IsConnected) {
-    return;
+    if (!module.Device.SocketConnection.IsConnected) {
+        return;
     }
 
-    iLoop++
-    switch (iLoop) {
-    case 5:
-    case 10: {
-        SendQuery(iPollSequence); return
-    }
-    case 15: {
-        iLoop = 0; return
-    }
-    default: {
-        if (iCommandLockOut) { return }
-        if (iRequiredPower && (iRequiredPower == uDisplay.PowerState.Actual)) { iRequiredPower = 0; return }
-        if (iRequiredInput && (iRequiredInput == uDisplay.Input.Actual)) { iRequiredInput = 0; return }
-        if (iRequiredAudioMute && (iRequiredAudioMute == uDisplay.Volume.Mute.Actual)) { iRequiredAudioMute = 0; return }
+    switch (args.Name) {
+        case NAV_LOGIC_ENGINE_EVENT_QUERY: {
+            SendQuery(pollSequence)
+            return
+        }
+        case NAV_LOGIC_ENGINE_EVENT_ACTION: {
+            if (module.CommandBusy) {
+                return
+            }
 
-        if (iRequiredPower && (iRequiredPower <> uDisplay.PowerState.Actual)) {
-        iCommandBusy = true
-        SetPower(iRequiredPower)
-        iCommandLockOut = true
-        wait 80 iCommandLockOut = false
-        iPollSequence = GET_POWER
+            if (object.Display.PowerState.Required && (object.Display.PowerState.Required == object.Display.PowerState.Actual)) { object.Display.PowerState.Required = 0; return }
+            if (object.Display.Input.Required && (object.Display.Input.Required == object.Display.Input.Actual)) { object.Display.Input.Required = 0; return }
+            // if (iRequiredAudioMute && (iRequiredAudioMute == object.Volume.Mute.Actual)) { iRequiredAudioMute = 0; return }
+
+            if (object.Display.PowerState.Required && (object.Display.PowerState.Required != object.Display.PowerState.Actual)) {
+                module.CommandBusy = true
+                SetPower(object.Display.PowerState.Required)
+                // iCommandLockOut = true
+                // wait 80 iCommandLockOut = false
+                pollSequence = GET_POWER
+                return
+            }
+
+            if (object.Display.Input.Required && (object.Display.PowerState.Actual == NAV_POWER_STATE_ON) && (object.Display.Input.Required != object.Display.Input.Actual)) {
+                module.CommandBusy = true
+                SetInput(object.Display.Input.Required)
+                // iCommandLockOut = true
+                // wait 10 iCommandLockOut = false
+                pollSequence = GET_INPUT
+                return
+            }
+
+            // if (iRequiredAudioMute && (object.Display.PowerState.Actual == NAV_POWER_STATE_ON) && (iRequiredAudioMute != object.Volume.Mute.Actual)) {
+            //     module.CommandBusy = true
+            //     SetAudioMute(iRequiredAudioMute);
+            //     iCommandLockOut = true
+            //     wait 10 iCommandLockOut = false
+            //     pollSequence = GET_MUTE;
+            //     return
+            // }
+
+            // if ([vdvObject, VOL_UP]) { RampVolume(VOL_UP) }
+            // if ([vdvObject, VOL_DN]) { RampVolume(VOL_DN) }
+        }
+    }
+}
+#END_IF
+
+
+define_function MaintainSocketConnection() {
+    if (module.Device.SocketConnection.IsConnected) {
         return
-        }
-
-        if (iRequiredInput && (uDisplay.PowerState.Actual == POWER_STATE_ON) && (iRequiredInput <> uDisplay.Input.Actual)) {
-        iCommandBusy = true
-        SetInput(iRequiredInput)
-        iCommandLockOut = true
-        wait 10 iCommandLockOut = false
-        iPollSequence = GET_INPUT
-        return
-        }
-
-        if (iRequiredAudioMute && (uDisplay.PowerState.Actual == POWER_STATE_ON) && (iRequiredAudioMute <> uDisplay.Volume.Mute.Actual)) {
-        iCommandBusy = true
-        SetAudioMute(iRequiredAudioMute);
-        iCommandLockOut = true
-        wait 10 iCommandLockOut = false
-        iPollSequence = GET_MUTE;
-        return
-        }
-
-        if ([vdvObject, VOL_UP]) { RampVolume(VOL_UP) }
-        if ([vdvObject, VOL_DN]) { RampVolume(VOL_DN) }
     }
+
+    NAVClientSocketOpen(dvPort.PORT,
+                        module.Device.SocketConnection.Address,
+                        module.Device.SocketConnection.Port,
+                        IP_TCP)
+}
+
+
+define_function char[NAV_MAX_BUFFER] GetMd5Message(_NAVCredential credential, char md5Seed[]) {
+    return "credential.Username, ':', credential.Password, ':', md5Seed"
+}
+
+
+#IF_DEFINED USING_NAV_MODULE_BASE_PROPERTY_EVENT_CALLBACK
+define_function NAVModulePropertyEventCallback(_NAVModulePropertyEvent event) {
+    if (event.Device != vdvObject) {
+        return
+    }
+
+    switch (event.Name) {
+        case NAV_MODULE_PROPERTY_EVENT_IP_ADDRESS: {
+            module.Device.SocketConnection.Address = NAVTrimString(event.Args[1])
+            NAVTimelineStart(TL_SOCKET_CHECK, TL_SOCKET_CHECK_INTERVAL, TIMELINE_ABSOLUTE, TIMELINE_REPEAT)
+        }
+        case NAV_MODULE_PROPERTY_EVENT_USERNAME: {
+            credential.Username = NAVTrimString(event.Args[1])
+        }
+        case NAV_MODULE_PROPERTY_EVENT_PASSWORD: {
+            credential.Password = NAVTrimString(event.Args[1])
+        }
+    }
+}
+#END_IF
+
+
+#IF_DEFINED USING_NAV_MODULE_BASE_PASSTHRU_EVENT_CALLBACK
+define_function NAVModulePassthruEventCallback(_NAVModulePassthruEvent event) {
+    if (event.Device != vdvObject) {
+        return
+    }
+
+    SendString(event.Payload)
+}
+#END_IF
+
+
+define_function HandleSnapiMessage(_NAVSnapiMessage message, tdata data) {
+    switch (message.Header) {
+        case 'POWER': {
+            switch (message.Parameter[1]) {
+                case 'ON': {
+                    object.Display.PowerState.Required = NAV_POWER_STATE_ON
+                }
+                case 'OFF': {
+                    object.Display.PowerState.Required = NAV_POWER_STATE_OFF
+                    object.Display.Input.Required = 0
+                }
+            }
+        }
+        case 'MUTE': {
+            if (object.Display.PowerState.Actual != NAV_POWER_STATE_ON) {
+                return
+            }
+
+            switch (message.Parameter[1]) {
+                case 'ON': {
+                    object.Display.VideoMute.Required = NAV_MUTE_STATE_ON
+                }
+                case 'OFF': {
+                    object.Display.VideoMute.Required = NAV_MUTE_STATE_OFF
+                }
+            }
+        }
+        case 'INPUT': {
+            stack_var integer input
+            stack_var char inputCommand[NAV_MAX_CHARS]
+
+            NAVTrimStringArray(message.Parameter)
+            inputCommand = NAVArrayJoinString(message.Parameter, ',')
+
+            input = NAVFindInArrayString(INPUT_SNAPI_PARAMS, inputCommand)
+
+            if (input <= 0) {
+                NAVErrorLog(NAV_LOG_LEVEL_WARNING,
+                            "'mPJLink => Invalid input: ', inputCommand")
+
+                return
+            }
+
+            object.Display.PowerState.Required = NAV_POWER_STATE_ON
+            object.Display.Input.Required = input
+        }
     }
 }
 
-define_function MaintainIPConnection() {
-    if (!uIPConnection.IsConnected) {
-    NAVClientSocketOpen(dvPort.port, uIPConnection.Address, uIPConnection.Port, IP_TCP)
-    }
-}
 
 (***********************************************************)
 (*                STARTUP CODE GOES BELOW                  *)
 (***********************************************************)
 DEFINE_START {
-    create_buffer dvPort,cRxBuffer
-    uIPConnection.Port = DEFAULT_TCP_PORT
-
+    create_buffer dvPort, module.RxBuffer.Data
+    module.Device.SocketConnection.Socket = dvPort.PORT
+    module.Device.SocketConnection.Port = IP_PORT
 }
+
 (***********************************************************)
 (*                THE EVENTS GO BELOW                      *)
 (***********************************************************)
 DEFINE_EVENT
+
 data_event[dvPort] {
     online: {
-    uIPConnection.IsConnected = true
-    NAVLog("'PJLINK_ONLINE<', NAVStringSurroundWith(NAVDeviceToString(data.device), '[', ']'), '>'")
+        if (data.device.number == 0) {
+            module.Device.SocketConnection.IsConnected = true
+        }
 
-    if (!timeline_active(TL_DRIVE)) {
-        NAVTimelineStart(TL_DRIVE, ltDrive, TIMELINE_ABSOLUTE, TIMELINE_REPEAT)
-    }
+        NAVLogicEngineStart()
     }
     string: {
-    [vdvObject, DEVICE_COMMUNICATING] = true
-    [vdvObject, DATA_INITIALIZED] = true
-    TimeOut()
-    NAVLog(NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_STRING_FROM, data.device, data.text))
-    if (!iSemaphore) { Process() }
+        CommunicationTimeOut(30)
+
+        NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
+                    NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_STRING_FROM,
+                                                data.device,
+                                                data.text))
+        select {
+            active(true): {
+                NAVStringGather(module.RxBuffer, DELIMITER)
+            }
+        }
     }
     offline: {
-    if (data.device.number == 0) {
-        uIPConnection.IsConnected = false
-        NAVClientSocketClose(data.device.port)
-        iConnectionStarted = false
-        NAVLog("'PJLINK_OFFLINE<', NAVStringSurroundWith(NAVDeviceToString(data.device), '[', ']'), '>'")
-    }
+        if (data.device.number == 0) {
+            NAVClientSocketClose(data.device.port)
+            Reset()
+        }
     }
     onerror: {
-    if (data.device.number == 0) {
-        uIPConnection.IsConnected = false
-        //NAVClientSocketClose(data.device.port)
-        NAVLog("'PJLINK_ONERROR<', NAVStringSurroundWith(NAVDeviceToString(data.device), '[', ']'), '>'")
-    }
+        if (data.device.number == 0) {
+            Reset()
+        }
+
+        NAVErrorLog(NAV_LOG_LEVEL_ERROR,
+                    "'mPJLink => OnError: ', NAVGetSocketError(type_cast(data.number))")
     }
 }
+
 
 data_event[vdvObject] {
+    online: {
+        NAVCommand(data.device, "'PROPERTY-RMS_MONITOR_ASSET_PROPERTY,MONITOR_ASSET_DESCRIPTION,Video Projector'")
+        NAVCommand(data.device, "'PROPERTY-RMS_MONITOR_ASSET_PROPERTY,MONITOR_ASSET_MANUFACTURER_URL,www.panasonic.com'")
+        NAVCommand(data.device, "'PROPERTY-RMS_MONITOR_ASSET_PROPERTY,MONITOR_ASSET_MANUFACTURER_NAME,PJLink'")
+    }
     command: {
-    stack_var char cCmdHeader[NAV_MAX_CHARS]
-    stack_var char cCmdParam[3][NAV_MAX_CHARS]
-    NAVLog(NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_COMMAND_FROM, data.device, data.text))
-    cCmdHeader = DuetParseCmdHeader(data.text)
-    cCmdParam[1] = DuetParseCmdParam(data.text)
-    cCmdParam[2] = DuetParseCmdParam(data.text)
-    cCmdParam[3] = DuetParseCmdParam(data.text)
-    switch (cCmdHeader) {
-        case 'PROPERTY': {
-        switch (cCmdParam[1]) {
-            case 'IP_ADDRESS': {
-            uIPConnection.Address = cCmdParam[2]
-            NAVTimelineStart(TL_IP_CLIENT_CHECK, ltIPClientCheck, TIMELINE_ABSOLUTE, TIMELINE_REPEAT)
-            }
-            case 'PASSWORD': {
-            cPassword = cCmdParam[2]
-            if (length_array(cMD5RandomNumber)) {
-                cMD5StringToEncode = "cMD5RandomNumber, cPassword"
-            }
-            }
-        }
-        }
-        //case 'PASSTHRU': { Build(cCmdParam[1]) }
-        case 'POWER': {
-        switch (cCmdParam[1]) {
-            case 'ON': { iRequiredPower = POWER_STATE_ON; Drive() }
-            case 'OFF': { iRequiredPower = POWER_STATE_OFF; iRequiredInput = 0; Drive() }
-        }
-        }
-        case 'INPUT': {
-        switch (cCmdParam[1]) {
-            case 'DIGITAL': {
-            iRequiredPower = POWER_STATE_ON
-            iRequiredInput = atoi(cCmdParam[2])
-            Drive()
-            }
-        }
-        }
-    }
+        stack_var _NAVSnapiMessage message
+
+        NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
+                    NAVFormatStandardLogMessage(NAV_STANDARD_LOG_MESSAGE_TYPE_COMMAND_FROM,
+                                                data.device,
+                                                data.text))
+
+        NAVParseSnapiMessage(data.text, message)
+
+        HandleSnapiMessage(message, data)
     }
 }
 
-channel_event[vdvObject,0] {
+
+channel_event[vdvObject, 0] {
     on: {
-    switch (channel.channel) {
-        case POWER: {
-        if (iRequiredPower) {
-            switch (iRequiredPower) {
-            case POWER_STATE_ON: { iRequiredPower = POWER_STATE_OFF; iRequiredInput = 0; Drive() }
-            case POWER_STATE_OFF: { iRequiredPower = POWER_STATE_ON; Drive() }
+        switch (channel.channel) {
+            case POWER: {
+                if (object.Display.PowerState.Required) {
+                    switch (object.Display.PowerState.Required) {
+                        case NAV_POWER_STATE_ON: {
+                            object.Display.PowerState.Required = NAV_POWER_STATE_OFF
+                            object.Display.Input.Required = 0
+                        }
+                        case NAV_POWER_STATE_OFF: {
+                            object.Display.PowerState.Required = NAV_POWER_STATE_ON
+                        }
+                    }
+                }
+                else {
+                    switch (object.Display.PowerState.Actual) {
+                        case NAV_POWER_STATE_ON: {
+                            object.Display.PowerState.Required = NAV_POWER_STATE_OFF
+                            object.Display.Input.Required = 0
+                        }
+                        case NAV_POWER_STATE_OFF: {
+                            object.Display.PowerState.Required = NAV_POWER_STATE_ON
+                        }
+                    }
+                }
             }
-        }else {
-            switch (uDisplay.PowerState.Actual) {
-            case POWER_STATE_ON: { iRequiredPower = POWER_STATE_OFF; iRequiredInput = 0; Drive() }
-            case POWER_STATE_OFF: { iRequiredPower = POWER_STATE_ON; Drive() }
+            case PWR_ON: {
+                object.Display.PowerState.Required = NAV_POWER_STATE_ON
             }
+            case PWR_OFF: {
+                object.Display.PowerState.Required = NAV_POWER_STATE_OFF
+                object.Display.Input.Required = 0
+            }
+            //case PIC_MUTE: { SetShutter(![vdvObject,PIC_MUTE_FB]) }
+            // case VOL_MUTE: {
+            //     if (object.Display.PowerState.Actual == NAV_POWER_STATE_ON) {
+            //         if (iRequiredAudioMute) {
+            //             switch (iRequiredAudioMute) {
+            //                 case NAV_MUTE_STATE_ON: { iRequiredAudioMute = NAV_MUTE_STATE_OFF; Drive() }
+            //                 case NAV_MUTE_STATE_OFF: { iRequiredAudioMute = NAV_MUTE_STATE_ON; Drive() }
+            //             }
+            //         }
+            //         else {
+            //             switch (object.Volume.Mute.Actual) {
+            //                 case NAV_MUTE_STATE_ON: { iRequiredAudioMute = NAV_MUTE_STATE_OFF; Drive() }
+            //                 case NAV_MUTE_STATE_OFF: { iRequiredAudioMute = NAV_MUTE_STATE_ON; Drive() }
+            //             }
+            //         }
+            //     }
+            // }
         }
-        }
-        case PWR_ON: { iRequiredPower = POWER_STATE_ON; Drive() }
-        case PWR_OFF: { iRequiredPower = POWER_STATE_OFF; iRequiredInput = 0; Drive() }
-        //case PIC_MUTE: { SetShutter(![vdvControl,PIC_MUTE_FB]) }
-        case VOL_MUTE: {
-        if (uDisplay.PowerState.Actual == POWER_STATE_ON) {
-            if (iRequiredAudioMute) {
-            switch (iRequiredAudioMute) {
-                case AUDIO_MUTE_ON: { iRequiredAudioMute = AUDIO_MUTE_OFF; Drive() }
-                case AUDIO_MUTE_OFF: { iRequiredAudioMute = AUDIO_MUTE_ON; Drive() }
-            }
-            }else {
-            switch (uDisplay.Volume.Mute.Actual) {
-                case AUDIO_MUTE_ON: { iRequiredAudioMute = AUDIO_MUTE_OFF; Drive() }
-                case AUDIO_MUTE_OFF: { iRequiredAudioMute = AUDIO_MUTE_ON; Drive() }
-            }
-            }
-        }
-        }
-    }
     }
 }
 
-timeline_event[TL_DRIVE] { Drive() }
 
-define_event timeline_event[TL_IP_CLIENT_CHECK] { MaintainIPConnection() }
+timeline_event[TL_SOCKET_CHECK] {
+    MaintainSocketConnection()
+}
+
 
 timeline_event[TL_NAV_FEEDBACK] {
-    [vdvObject, VOL_MUTE_FB] = (uDisplay.Volume.Mute.Actual == AUDIO_MUTE_ON)
-    [vdvObject, POWER_FB] = (uDisplay.PowerState.Actual == POWER_STATE_ON)
-    [vdvObject, LAMP_WARMING_FB]    = (uDisplay.PowerState.Actual == POWER_STATE_LAMP_WARMING)
-    [vdvObject, LAMP_COOLING_FB]    = (uDisplay.PowerState.Actual == POWER_STATE_LAMP_COOLING)
+    [vdvObject, NAV_IP_CONNECTED]	= (module.Device.SocketConnection.IsConnected)
+    [vdvObject, DEVICE_COMMUNICATING] = (module.Device.IsCommunicating)
+    [vdvObject, DATA_INITIALIZED] = (module.Device.IsInitialized)
+
+    [vdvObject, LAMP_WARMING_FB]    = (object.Display.PowerState.Actual == NAV_POWER_STATE_LAMP_WARMING)
+    [vdvObject, LAMP_COOLING_FB]    = (object.Display.PowerState.Actual == NAV_POWER_STATE_LAMP_COOLING)
+    [vdvObject, POWER_FB]           = (object.Display.PowerState.Actual == NAV_POWER_STATE_ON)
+    [vdvObject, PIC_MUTE_FB]        = (object.Display.VideoMute.Actual == NAV_MUTE_STATE_ON)
+
+    // [vdvObject, 31]    =    (object.Display.Input.Actual == INPUT_VGA_1)
+    // [vdvObject, 32]    =    (object.Display.Input.Actual == INPUT_RGB_1)
+    // [vdvObject, 33]    =    (object.Display.Input.Actual == INPUT_VIDEO_1)
+    // [vdvObject, 34]    =    (object.Display.Input.Actual == INPUT_SVIDEO_1)
+    // [vdvObject, 35]    =    (object.Display.Input.Actual == INPUT_DVI_1)
+    // [vdvObject, 36]    =    (object.Display.Input.Actual == INPUT_SDI_1)
+    // [vdvObject, 37]    =    (object.Display.Input.Actual == INPUT_HDMI_1)
+    // [vdvObject, 38]    =    (object.Display.Input.Actual == INPUT_DIGITAL_LINK_1)
 }
+
 
 (***********************************************************)
 (*                     END OF PROGRAM                      *)
 (*        DO NOT PUT ANY CODE BELOW THIS COMMENT           *)
 (***********************************************************)
-
