@@ -47,10 +47,10 @@ constant integer IP_PORT    = 4352
 constant char HEADER[][2]    = { '%1', '%2' }
 constant char DELIMITER = {NAV_CR_CHAR}
 
-constant char COMMAND_POWER[]       = 'POWR'
-constant char COMMAND_INPUT[]       = 'INPT'
-constant char COMMAND_AV_MUTE[]     = 'AVMT'
-constant char COMMAND_LAMP[]        = 'LAMP'
+constant char COMMAND_POWER[4]       = 'POWR'
+constant char COMMAND_INPUT[4]       = 'INPT'
+constant char COMMAND_AV_MUTE[4]     = 'AVMT'
+constant char COMMAND_LAMP[4]        = 'LAMP'
 
 constant integer INPUT_DIGITAL_1    = 1
 constant integer INPUT_DIGITAL_2    = 2
