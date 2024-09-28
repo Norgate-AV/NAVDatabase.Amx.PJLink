@@ -1,0 +1,124 @@
+{
+    "branches": ["master"],
+    "preset": "conventionalcommits",
+    "plugins": [
+        [
+            "@semantic-release/commit-analyzer",
+            {
+                "releaseRules": [],
+                "parserOpts": {
+                    "noteKeywords": ["BREAKING CHANGE", "BREAKING CHANGES", "BREAKING"]
+                }
+            }
+        ],
+        [
+            "@semantic-release/release-notes-generator",
+            {
+                "preset": "conventionalcommits",
+                "parserOpts": {
+                    "noteKeywords": ["BREAKING CHANGE", "BREAKING CHANGES", "BREAKING"]
+                },
+                "writerOpts": {
+                    "commitsSort": ["subject", "scope"]
+                },
+                "presetConfig": {
+                    "header": "Changelog",
+                    "types": [
+                        {
+                            "type": "feat",
+                            "section": "🌟 Features",
+                            "hidden": false
+                        },
+                        {
+                            "type": "fix",
+                            "section": "🐛 Bug Fixes",
+                            "hidden": false
+                        },
+                        {
+                            "type": "chore",
+                            "section": "🧰 Chores",
+                            "hidden": true
+                        },
+                        {
+                            "type": "docs",
+                            "section": "📖 Documentation",
+                            "hidden": true
+                        },
+                        {
+                            "type": "style",
+                            "section": "💅 Style",
+                            "hidden": true
+                        },
+                        {
+                            "type": "refactor",
+                            "section": "✨ Refactor",
+                            "hidden": true
+                        },
+                        {
+                            "type": "perf",
+                            "section": "🚀 Performance",
+                            "hidden": false
+                        },
+                        {
+                            "type": "test",
+                            "section": "🧪 Tests",
+                            "hidden": true
+                        },
+                        {
+                            "type": "build",
+                            "section": "🛠️ Build",
+                            "hidden": true
+                        },
+                        { "type": "ci", "section": "🤖 CI", "hidden": true }
+                    ]
+                }
+            }
+        ],
+        [
+            "@semantic-release/changelog",
+            {
+                "changelogTitle": "# Changelog"
+            }
+        ],
+        [
+            "@semantic-release/npm",
+            {
+                "npmPublish": false
+            }
+        ],
+        [
+            "@semantic-release/exec",
+            {
+                "shell": "pwsh",
+                "prepareCmd": "(Get-Content -Path manifest.json) -replace '\"version\": \".*\"', '\"version\": \"${nextRelease.version}\"' | Set-Content manifest.json"
+            }
+        ],
+        [
+            "@semantic-release/exec",
+            {
+                "shell": "pwsh",
+                "prepareCmd": "./archive.ps1"
+            }
+        ],
+        [
+            "@semantic-release/git",
+            {
+                "assets": ["package.json", "CHANGELOG.md", "manifest.json"],
+                "message": "chore(release): ${nextRelease.version} [skip ci]"
+            }
+        ],
+        [
+            "@semantic-release/github",
+            {
+                "assets": [
+                    {
+                        "path": "./dist/*.{zip,sha256}"
+                    },
+                    {
+                        "path": "./src/*.{tko,TKO}"
+                    }
+                ]
+            }
+        ]
+    ]
+}
