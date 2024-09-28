@@ -14,16 +14,17 @@ defaults:
     shell: pwsh
 
 jobs:
-  setup:
-    name: Setup
+  build-and-release:
+    name: Build & Release
 
     runs-on: [self-hosted, windows, server]
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          persist-credentials: false
 
       - name: Show Environment
         run: |
@@ -78,73 +79,67 @@ jobs:
           Write-Host "RUNNER_TEMP: $env:RUNNER_TEMP"
           Write-Host "RUNNER_TOOL_CACHE: $env:RUNNER_TOOL_CACHE"
 
+      - uses: pnpm/action-setup@v3
+        with:
+          version: 8
+
       - name: Setup Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@v4
         with:
           node-version-file: ".nvmrc"
+          cache: pnpm
 
-      - name: Install (with cache)
-        uses: bahmutov/npm-install@v1
-        with:
-          install-command: pnpm install
+      - name: Install
+        run: pnpm install
 
-      - name: Check for genlinx
-        run: which genlinx
-
-  build:
-    name: Build
-
-    runs-on: [self-hosted, windows, server]
-
-    needs: [setup]
-
-    steps:
-      - name: Run Genlinx
+      - name: Build
         run: ./build.ps1
 
-      - name: Upload build log only if failure
-        uses: actions/upload-artifact@v3
-        if: failure()
+      - name: Release
+        id: release
+        if: github.ref == 'refs/heads/master'
+
+        # v4 doesn't seem to be working, so using a specific commit for now
+        uses: cycjimmy/semantic-release-action@6d88447fcd3237e1d617f4f663e5ad79a6bf45b1
         with:
-          name: build-log
-          path: ./*.build.log
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v3
-        with:
-          name: build-artifacts
-          path: |
-            ./Source/*.tko
-            ./*.build.log
-
-  release:
-    name: Create Release
-
-    runs-on: [self-hosted, windows, server]
-
-    needs: [build]
-
-    if: github.ref == 'refs/heads/master'
-
-    steps:
-      - name: Conventional Changelog
-        id: changelog
-        uses: TriPSs/conventional-changelog-action@d360fad3a42feca6462f72c97c165d60a02d4bf2
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          tag-prefix: ""
-          release-count: "0"
-          create-summary: true
-          preset: "conventionalcommits"
-          config-file-path: "./.changelogrc.json"
-
-      - name: Create Github Release
-        uses: actions/create-release@v1
-        if: ${{ steps.changelog.outputs.skipped == 'false' }}
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/exec
+            @semantic-release/git
+            conventional-changelog-conventionalcommits
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Show Release Output Values
+        if: github.ref == 'refs/heads/master'
+        run: |
+          Write-Host "New Release Published: ${{ steps.release.outputs.new_release_published }}"
+          Write-Host "New Release Version: ${{ steps.release.outputs.new_release_version }}"
+          Write-Host "New Release Major Version: ${{ steps.release.outputs.new_release_major_version }}"
+          Write-Host "New Release Minor Version: ${{ steps.release.outputs.new_release_minor_version }}"
+          Write-Host "New Release Patch Version: ${{ steps.release.outputs.new_release_patch_version }}"
+          Write-Host "New Release Channel: ${{ steps.release.outputs.new_release_channel }}"
+          Write-Host "New Release Notes: ${{ steps.release.outputs.new_release_notes }}"
+          Write-Host "New Release Git Head: ${{ steps.release.outputs.new_release_git_head }}"
+          Write-Host "New Release Git Tag: ${{ steps.release.outputs.new_release_git_tag }}"
+          Write-Host "Last Release Version: ${{ steps.release.outputs.last_release_version }}"
+          Write-Host "Last Release Git Head: ${{ steps.release.outputs.last_release_git_head }}"
+          Write-Host "Last Release Git Tag: ${{ steps.release.outputs.last_release_git_tag }}"
+
+      - name: Dispatch Scoop Excavator
+        if: ${{ github.ref == 'refs/heads/master' && steps.release.outputs.new_release_published == 'true' }}
+        uses: peter-evans/repository-dispatch@v3
         with:
-          tag_name: ${{ steps.changelog.outputs.tag }}
-          release_name: ${{ steps.changelog.outputs.tag }}
-          body: ${{ steps.changelog.outputs.clean_changelog }}
-          # body_path: CHANGELOG.md
+          token: ${{ secrets.SCOOP_NORGATEAV_AMX }}
+          repository: norgate-av/scoop-norgateav-amx
+          event-type: excavate
+          client-payload: |-
+            {
+              "repo": {
+                "name": "${{ github.repository }}",
+                "owner": "${{ github.repository_owner }}",
+                "ref": "${{ github.ref }}",
+                "sha": "${{ steps.release.outputs.new_release_git_head }}",
+                "tag": "${{ steps.release.outputs.new_release_git_tag }}"
+              }
+            }
