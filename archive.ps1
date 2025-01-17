@@ -31,55 +31,48 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 #>
 
+
 [CmdletBinding()]
 
 param (
     [Parameter(Mandatory = $false)]
     [string]
-    $Path = "."
+    $Path = ".",
+
+    [Parameter(Mandatory = $false)]
+    [string]
+    $OutDir = "dist"
 )
 
 try {
-    $Path = Resolve-Path $Path
+    $Path = Resolve-Path -Path $Path
 
-    $axiFiles = Get-ChildItem -Path $Path -Recurse -File -Filter *.axi -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "(.history|vendor)" }
-    $axsFiles = Get-ChildItem -Path $Path -Recurse -File -Filter *.axs -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "(.history|vendor)" }
+    $manifest = Get-Content -Path "$Path/manifest.json" -Raw | ConvertFrom-Json
 
-    if (!$axiFiles -and !$axsFiles) {
-        Write-Host "No files found in $Path" -ForegroundColor Yellow
-        exit
+    if (!$manifest) {
+        Write-Error "No manifest.json file found in $Path"
+        exit 1
     }
 
-    $files = [System.Collections.ArrayList]::new()
+    $version = $manifest.version
+    $name = $manifest.name
 
-    foreach ($axiFile in $axiFiles) {
-        $files += $axiFile
+    $files = @()
+
+    foreach ($file in $manifest.files) {
+        $files += Get-ChildItem -File $file -ErrorAction Stop | Where-Object { $_.FullName -notmatch "(.git|.history|node_modules|dist)" }
     }
 
-    foreach ($axsFile in $axsFiles) {
-        $files += $axsFile
+    $files += "$Path/manifest.json"
+
+    if (-not(Test-Path -Path "$Path/$OutDir")) {
+        New-Item -Path "$Path/$OutDir" -Type Directory | Out-Null
     }
 
-    Write-Host "Building $($files.Count) files..." -ForegroundColor Cyan
+    $zip = "$Path/$OutDir/$name.$version.archive.zip"
+    Compress-Archive -Path $files -DestinationPath $zip -Force
 
-    foreach ($file in $files) {
-        $x = $files.IndexOf($file) + 1
-        Write-Host "Building file $x of $($files.Count)..." -ForegroundColor Cyan
-
-        $percent = [math]::Round((($x - 1) / $files.Count) * 100, 2)
-        Write-Host "[$percent%]" -ForegroundColor Cyan
-
-        & pnpm "genlinx" build -s $file
-
-        if ($LASTEXITCODE -ne 0) {
-            Write-Host "genlinx failed with exit code $($LASTEXITCODE)" -ForegroundColor Red
-            exit 1
-        }
-    }
-
-    $percent = [math]::Round(($x / $files.Count) * 100, 2)
-    Write-Host "[$percent%]" -ForegroundColor Cyan
-    Write-Host "Build complete!" -ForegroundColor Green
+    (Get-FileHash $zip).Hash.ToLower() | Out-File -FilePath "$zip.sha256" -Encoding ascii
 }
 catch {
     Write-Host $_.Exception.GetBaseException().Message -ForegroundColor Red

@@ -53,8 +53,13 @@ $prevPWD = $PWD
 Set-Location $PSScriptRoot
 
 try {
-    $moduleFiles = Get-ChildItem -File "**/*.axs" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "(.git|.history|node_modules)" }
-    $includeFiles = Get-ChildItem -File "**/*.axi" -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "(.git|.history|node_modules)" }
+    $directories = Get-ChildItem -Directory -ErrorAction SilentlyContinue | Where-Object { $_.FullName -notmatch "(\.\w+|node_modules|dist)" }
+
+    # Needed for scoop as all files with be in the root directory
+    $directories += $PWD
+
+    $moduleFiles = $directories | Get-ChildItem -Filter "*.axs"
+    $includeFiles = $directories | Get-ChildItem -Filter "*.axi"
 
     if (!$moduleFiles) {
         Write-Host "No module files found"
