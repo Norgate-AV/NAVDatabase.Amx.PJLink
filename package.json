@@ -17,7 +17,7 @@
         "url": "https://github.com/Norgate-AV/NAVDatabase.Amx.PJLink/issues"
     },
     "engines": {
-        "node": ">=18"
+        "node": ">=20"
     },
     "scripts": {
         "build": "pwsh ./build.ps1",
@@ -30,9 +30,9 @@
         "contrib:check": "all-contributors check"
     },
     "devDependencies": {
-        "@commitlint/cli": "^19.5.0",
-        "@commitlint/config-conventional": "^19.5.0",
-        "@norgate-av/genlinx": "^2.5.0",
+        "@commitlint/cli": "^19.6.1",
+        "@commitlint/config-conventional": "^19.6.0",
+        "@norgate-av/genlinx": "^2.6.1",
         "@semantic-release/changelog": "^6.0.3",
         "@semantic-release/exec": "^6.0.3",
         "@semantic-release/git": "^10.0.1",
@@ -40,9 +40,9 @@
         "commitizen": "^4.3.1",
         "cz-conventional-changelog": "3.3.0",
         "doctoc": "^2.2.1",
-        "husky": "^9.1.6",
-        "lint-staged": "^15.2.10",
-        "prettier": "^3.3.3",
-        "semantic-release": "^24.1.2"
+        "husky": "^9.1.7",
+        "lint-staged": "^15.4.0",
+        "prettier": "^3.4.2",
+        "semantic-release": "^24.2.1"
     }
 }
