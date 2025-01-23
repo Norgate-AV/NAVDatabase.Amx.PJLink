@@ -153,7 +153,27 @@ function Get-GitHubReleases {
     $apiUrl = "https://api.github.com/repos/$Owner/$Repo/releases"
     Write-Host "Fetching releases..."
 
-    $releases = Invoke-RestMethod -Uri $apiUrl -UseBasicParsing
+    $headers = @{
+        "Accept" = "application/vnd.github+json"
+        "X-GitHub-Api-Version" = "2022-11-28"
+    }
+
+    # Check the environment for a GitHub token
+    # If a variable called GITHUB_TOKEN is set, use it for authentication
+    $token = [Environment]::GetEnvironmentVariable("GITHUB_TOKEN")
+
+    if ($token) {
+        $headers["Authorization"] = "Bearer $token"
+    }
+
+    $params = @{
+        Uri = $apiUrl
+        UseBasicParsing = $true
+        Headers = $headers
+        ContentType = "application/json"
+    }
+
+    $releases = Invoke-RestMethod @params
 
     # Extract version numbers and sort them
     $versions = @($releases | ForEach-Object {
@@ -362,6 +382,24 @@ function Get-VersionRequirement {
     return $requirement
 }
 
+function Read-EnvFile {
+    $envPath = Join-Path $PSScriptRoot ".env"
+
+    if (-not (Test-Path $envPath)) {
+        return
+    }
+
+    Get-Content $envPath | ForEach-Object {
+        if ($_ -match '^([^=]+)=(.*)$') {
+            $key = $matches[1].Trim()
+            $value = $matches[2].Trim()
+            [Environment]::SetEnvironmentVariable($key, $value, [EnvironmentVariableTarget]::Process)
+        }
+    }
+
+    Write-Host "Loaded environment variables from .env file"
+}
+
 try {
     $Path = Resolve-Path -Path $Path
 
@@ -371,6 +409,10 @@ try {
         Write-Error "No manifest.json file found in $Path"
         exit 1
     }
+
+    # Look for a .env file in the same directory.
+    # If it exists, load the environment variables from it
+    Read-EnvFile
 
     $vendorPath = Join-Path $PSScriptRoot $OutDir
 
