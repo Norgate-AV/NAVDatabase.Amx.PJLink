@@ -41,7 +41,11 @@ param (
 
     [Parameter(Mandatory = $false)]
     [string]
-    $OutDir = "vendor"
+    $OutDir = "vendor",
+
+    [Parameter(Mandatory = $false)]
+    [switch]
+    $Symlink = $false
 )
 
 function Get-ConfigConverter {
@@ -219,6 +223,11 @@ function Update-GenlinxRc {
     $convertTo = Get-ConfigConverter -Path $Path -To
 
     $genlinxrc = Get-Content -Path $Path -Raw | & $convertFrom
+
+    # Ensure `.` is replaced with `-` in the owner and repo names, and version
+    $DependencyOwner = $DependencyOwner.Replace(".", "-")
+    $DependencyUrl = $DependencyUrl.Replace(".", "-")
+    $DependencyVersion = $DependencyVersion.Replace(".", "-")
 
     $genlinxrc.build.nlrc.includePath += "./$OutDir/$DependencyOwner/$DependencyUrl/$DependencyVersion"
     $genlinxrc.build.nlrc.modulePath += "./$OutDir/$DependencyOwner/$DependencyUrl/$DependencyVersion"
@@ -400,6 +409,46 @@ function Read-EnvFile {
     Write-Host "Loaded environment variables from .env file"
 }
 
+function Add-Symlinks {
+    param (
+        [string]$Path,
+        [string]$Extension,
+        [string]$TargetDirectory,
+        [switch]$GitIgnore = $false
+    )
+
+    $files = Get-ChildItem -Path $Path -Recurse -Filter "*.$Extension" -ErrorAction SilentlyContinue
+
+    if (!$files) {
+        return
+    }
+
+    Write-Host "Symlinking .$Extension files..."
+
+    if (-not (Test-Path $TargetDirectory)) {
+        New-Item -ItemType Directory -Path $TargetDirectory | Out-Null
+    }
+
+    foreach ($file in $files) {
+        $symlinkPath = Join-Path $TargetDirectory $file.Name
+        New-Item -ItemType SymbolicLink -Path $symlinkPath -Target $file.FullName -Force | Out-Null
+
+        if (!$GitIgnore) {
+            continue
+        }
+
+        # Update .gitignore file with relative path to symlink
+        $gitignoreFile = "$PSScriptRoot/.gitignore"
+        $ignorePath = "$(Split-Path -Path $TargetDirectory -Leaf)/$($file.Name)"
+
+        if (Select-String -Path $gitignoreFile -Pattern $ignorePath -Quiet) {
+            continue
+        }
+
+        Add-Content -Path $gitignoreFile -Value $ignorePath
+    }
+}
+
 try {
     $Path = Resolve-Path -Path $Path
 
@@ -410,9 +459,20 @@ try {
         exit 1
     }
 
+    if ($env:CI) {
+        Write-Host "Running in CI environment"
+    } else {
+        Write-Host "Running in local environment"
+    }
+
     # Look for a .env file in the same directory.
     # If it exists, load the environment variables from it
     Read-EnvFile
+
+    if (!$env:GITHUB_TOKEN) {
+        Write-Host "GITHUB_TOKEN environment variable not set"
+        Write-Host "GitHub API rate limits may apply"
+    }
 
     $vendorPath = Join-Path $PSScriptRoot $OutDir
 
@@ -443,7 +503,7 @@ try {
 
             $version = Get-Version -Version $dependency.version
 
-            $packagePath = Join-Path $vendorPath "$($repoInfo.Owner)/$($repoInfo.Repo)/$($version)"
+            $packagePath = Join-Path $vendorPath "$($repoInfo.Owner.Replace(".", "-"))/$($repoInfo.Repo.Replace(".", "-"))/$($version.Replace(".", "-"))"
             if (-not (Test-Path $packagePath)) {
                 New-Item -ItemType Directory -Path $packagePath | Out-Null
             }
@@ -458,18 +518,31 @@ try {
                 -version $version `
                 -destinationPath $packagePath
 
-            Write-Host "Successfully installed $($repoInfo.Repo)@$($version)"
+            if (!$Symlink) {
+                # NLRC doesn't seem to like lots of paths in the includePath and modulePaths
+                # Unsure of the exact number. It works upto a point and then fails.
+                # If adding a lot of paths, it's better to symlink the files in the package instead
+                if (!$genlinxrc) {
+                    continue
+                }
 
-            if (!$genlinxrc) {
-                continue
+                Update-Genlinxrc `
+                    -Path $genlinxrc `
+                    -OutDir $OutDir `
+                    -DependencyOwner $repoInfo.Owner `
+                    -DependencyUrl $repoInfo.Repo `
+                    -DependencyVersion $version
+            } else {
+                # This will allow the NLRC to find the files without having to add them to the .genlinxrc file
+                # This is a workaround until we can figure out how to add the paths to the .genlinxrc file
+                Add-Symlinks -Path $packagePath -Extension "axi" -TargetDirectory "$Path/lib" -GitIgnore
+
+                # tko, jar files are already ignored by Git
+                Add-Symlinks -Path $packagePath -Extension "tko" -TargetDirectory "$Path/src"
+                Add-Symlinks -Path $packagePath -Extension "jar" -TargetDirectory "$Path/src"
             }
 
-            Update-Genlinxrc `
-                -Path $genlinxrc `
-                -OutDir $OutDir `
-                -DependencyOwner $repoInfo.Owner `
-                -DependencyUrl $repoInfo.Repo `
-                -DependencyVersion $version
+            Write-Host "Successfully installed $($repoInfo.Repo)@$($version)"
         }
         catch {
             Write-Error "Failed to process dependency $($dependency.url): $_"
