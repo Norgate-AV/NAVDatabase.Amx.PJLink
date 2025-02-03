@@ -30,7 +30,7 @@
         "contrib:check": "all-contributors check"
     },
     "devDependencies": {
-        "@commitlint/cli": "^19.6.1",
+        "@commitlint/cli": "^19.7.1",
         "@commitlint/config-conventional": "^19.6.0",
         "@norgate-av/genlinx": "^2.6.1",
         "@semantic-release/changelog": "^6.0.3",
