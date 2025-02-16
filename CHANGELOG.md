@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.0.1](https://github.com/Norgate-AV/NAVDatabase.Amx.PJLink/compare/v1.0.0...v1.0.1) (2025-02-16)
+
+### 🚀 Performance
+
+- remove unnecessary logging ([71ee63b](https://github.com/Norgate-AV/NAVDatabase.Amx.PJLink/commit/71ee63b711357ba03b9a7662afae869bbb32321b))
+
 ## 1.0.0 (2025-01-17)
 
 ### 🌟 Features
