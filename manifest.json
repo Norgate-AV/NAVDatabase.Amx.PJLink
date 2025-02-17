@@ -13,7 +13,7 @@
     },
     "dependencies": [
         {
-            "version": "^1.25.0",
+            "version": "^1.27.0",
             "url": "github.com/Norgate-AV/NAVFoundation.Amx"
         }
     ]
