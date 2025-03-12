@@ -1,5 +1,11 @@
 # Changelog
 
+## [1.2.0](https://github.com/Norgate-AV/NAVDatabase.Amx.PJLink/compare/v1.1.0...v1.2.0) (2025-03-12)
+
+### 🌟 Features
+
+- update to support NAVFoundation.Amx v2.0.0 ([d636a18](https://github.com/Norgate-AV/NAVDatabase.Amx.PJLink/commit/d636a18977b195bb816f3577c63cdc5277b6ccc4))
+
 ## [1.1.0](https://github.com/Norgate-AV/NAVDatabase.Amx.PJLink/compare/v1.0.1...v1.1.0) (2025-02-18)
 
 ### 🌟 Features
