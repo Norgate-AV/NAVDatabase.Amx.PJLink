@@ -13,6 +13,8 @@ MODULE_NAME='mPJLink'   (
 #include 'NAVFoundation.ModuleBase.axi'
 #include 'NAVFoundation.SocketUtils.axi'
 #include 'NAVFoundation.StringUtils.axi'
+#include 'NAVFoundation.ErrorLogUtils.axi'
+#include 'NAVFoundation.Encoding.axi'
 #include 'NAVFoundation.Cryptography.Md5.axi'
 #include 'LibPJLink.axi'
 
@@ -76,8 +78,8 @@ volatile _NAVProjector object
 
 volatile integer pollSequence = GET_POWER
 
-volatile integer secureCommandRequired
-volatile integer connectionStarted
+volatile char secureCommandRequired
+volatile char connectionStarted
 
 volatile char md5Seed[255]
 
@@ -104,7 +106,7 @@ define_function SendString(char payload[]) {
     payload = "payload, NAV_CR"
 
     if (secureCommandRequired) {
-        payload = "NAVMd5GetHash(GetMd5Message(credential, md5Seed)), payload"
+        payload = "NAVHexToString(NAVMd5GetHash(GetMd5Message(credential, md5Seed))), payload"
     }
 
     NAVErrorLog(NAV_LOG_LEVEL_DEBUG,
@@ -131,9 +133,11 @@ define_function CommunicationTimeOut(integer timeout) {
     cancel_wait 'TimeOut'
 
     module.Device.IsCommunicating = true
+    UpdateFeedback()
 
     wait (timeout * 10) 'TimeOut' {
         module.Device.IsCommunicating = false
+        UpdateFeedback()
     }
 }
 
@@ -142,6 +146,7 @@ define_function Reset() {
     module.Device.SocketConnection.IsConnected = false
     module.Device.IsCommunicating = false
     module.Device.IsInitialized = false
+    UpdateFeedback()
 
     connectionStarted = false
 
@@ -251,6 +256,8 @@ define_function NAVStringGatherCallback(_NAVStringGatherResult args) {
                             pollSequence = GET_LAMP
                         }
                     }
+
+                    UpdateFeedback()
                 }
                 case COMMAND_INPUT: {
                     stack_var integer input
@@ -271,6 +278,8 @@ define_function NAVStringGatherCallback(_NAVStringGatherResult args) {
                         case '31': { object.Display.VideoMute.Actual = NAV_MUTE_STATE_ON }
                         case '30': { object.Display.VideoMute.Actual = NAV_MUTE_STATE_OFF }
                     }
+
+                    UpdateFeedback()
 
                     object.Display.VideoMute.Initialized = true
                     pollSequence = GET_POWER
@@ -478,6 +487,18 @@ define_function HandleSnapiMessage(_NAVSnapiMessage message, tdata data) {
 }
 
 
+define_function UpdateFeedback() {
+    [vdvObject, NAV_IP_CONNECTED]	= (module.Device.SocketConnection.IsConnected)
+    [vdvObject, DEVICE_COMMUNICATING] = (module.Device.IsCommunicating)
+    [vdvObject, DATA_INITIALIZED] = (module.Device.IsInitialized)
+
+    [vdvObject, LAMP_WARMING_FB]    = (object.Display.PowerState.Actual == NAV_POWER_STATE_LAMP_WARMING)
+    [vdvObject, LAMP_COOLING_FB]    = (object.Display.PowerState.Actual == NAV_POWER_STATE_LAMP_COOLING)
+    [vdvObject, POWER_FB]           = (object.Display.PowerState.Actual == NAV_POWER_STATE_ON)
+    [vdvObject, PIC_MUTE_FB]        = (object.Display.VideoMute.Actual == NAV_MUTE_STATE_ON)
+}
+
+
 (***********************************************************)
 (*                STARTUP CODE GOES BELOW                  *)
 (***********************************************************)
@@ -496,6 +517,7 @@ data_event[dvPort] {
     online: {
         if (data.device.number == 0) {
             module.Device.SocketConnection.IsConnected = true
+            UpdateFeedback()
         }
 
         NAVLogicEngineStart()
@@ -587,18 +609,6 @@ channel_event[vdvObject, 0] {
 
 timeline_event[TL_SOCKET_CHECK] {
     MaintainSocketConnection()
-}
-
-
-timeline_event[TL_NAV_FEEDBACK] {
-    [vdvObject, NAV_IP_CONNECTED]	= (module.Device.SocketConnection.IsConnected)
-    [vdvObject, DEVICE_COMMUNICATING] = (module.Device.IsCommunicating)
-    [vdvObject, DATA_INITIALIZED] = (module.Device.IsInitialized)
-
-    [vdvObject, LAMP_WARMING_FB]    = (object.Display.PowerState.Actual == NAV_POWER_STATE_LAMP_WARMING)
-    [vdvObject, LAMP_COOLING_FB]    = (object.Display.PowerState.Actual == NAV_POWER_STATE_LAMP_COOLING)
-    [vdvObject, POWER_FB]           = (object.Display.PowerState.Actual == NAV_POWER_STATE_ON)
-    [vdvObject, PIC_MUTE_FB]        = (object.Display.VideoMute.Actual == NAV_MUTE_STATE_ON)
 }
 
 
